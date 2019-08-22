@@ -1,0 +1,95 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: A sample Lambda Safe Deployment Application
+Resources:
+  SafeTestLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: safeTest.handler
+      Runtime: nodejs10.x
+      CodeUri: s3://aws-sam-bucket-al/8b095defae044c5f05b3631c25d8c0de
+      AutoPublishAlias: live
+      DeploymentPreference:
+        Type: Linear10PercentEvery1Minute
+        Alarms:
+        - Ref: AliasErrorMetricGreaterThanZeroAlarm
+        - Ref: LatestVersionErrorMetricGreaterThanZeroAlarm
+        Hooks:
+          PreTraffic:
+            Ref: PreTrafficHook
+      Events:
+        API:
+          Type: Api
+          Properties:
+            Path: /safe
+            Method: get
+  AliasErrorMetricGreaterThanZeroAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Lambda Function Error > 0
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+      - Name: Resource
+        Value:
+          Fn::Sub: ${SafeTestLambda}:live
+      - Name: FunctionName
+        Value:
+          Ref: SafeTestLambda
+      EvaluationPeriods: 2
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Period: 60
+      Statistic: Sum
+      Threshold: 0
+  LatestVersionErrorMetricGreaterThanZeroAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Lambda Function Error > 0
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+      - Name: Resource
+        Value:
+          Fn::Sub: ${SafeTestLambda}:live
+      - Name: FunctionName
+        Value:
+          Ref: SafeTestLambda
+      - Name: ExecutedVersion
+        Value:
+          Fn::GetAtt:
+          - SafeTestLambda
+          - Version.Version
+      EvaluationPeriods: 2
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Period: 60
+      Statistic: Sum
+      Threshold: 0
+  PreTrafficHook:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: preTrafficHook.handler
+      Runtime: nodejs10.x
+      CodeUri: s3://aws-sam-bucket-al/8b095defae044c5f05b3631c25d8c0de
+      Policies:
+      - Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+          - codedeploy:PutLifecycleEventHookExecutionStatus
+          Resource:
+            Fn::Sub: arn:${AWS::Partition}:codedeploy:${AWS::Region}:${AWS::AccountId}:deploymentgroup:${ServerlessDeploymentApplication}/*
+      - Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+          - lambda:InvokeFunction
+          Resource:
+            Ref: SafeTestLambda.Version
+      FunctionName: CodeDeployHook_preTrafficHook
+      DeploymentPreference:
+        Enabled: false
+        Role: ''
+      Environment:
+        Variables:
+          CurrentVersion:
+            Ref: SafeTestLambda.Version
